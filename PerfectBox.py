@@ -2,6 +2,10 @@ import time
 import RPi.GPIO as GPIO
 from i2clibraries import i2c_hmc5883l
 from wiringpi import pcf8591
+from quick2wire.i2c import writing_bytes, reading
+from quick2wire.gpio import Out, In
+from quick2wire.parts.pcf8591 import *
+from quick2wire.i2c import I2CMaster
 
 ##IN1 = 19   
 ##IN2 = 13
@@ -37,7 +41,9 @@ class controller():
         self.distance = 0
 
     def countRoute(self, pathToMap): # определение целевого направления и дистанции, используя карту местности
-        return self.targetDirection, self.targetDistance
+        self.targetDirection = targetDirection
+        self.targetDistance = targetDistance
+        
 
 
     def _setup_GPIO(self, IN1, IN2, IN3, IN4, ENA, ENB): # настройка параметров GPIO
@@ -52,7 +58,9 @@ class controller():
         GPIO.setup(ENA, GPIO.OUT)
         GPIO.setup(ENB, GPIO.OUT)
 
-    def getCurrentDirection(self, hmc5883l): # получить текущее направление и проверить, совпадает ли оно с заданным
+    def getCurrentDirection(self, hmc5883l, i2c, i2cAddress): # получить текущее направление и проверить, совпадает ли оно с заданным
+        i2c.writeReg8(dev, 0x48,0x41)
+		i2c.readReg8(dev,0x48)	
         currentDirection = hmc5883l.getHeading()
         directionDiff = abs(int(currentDirection[0])-self.targetDirection) 
         if directionDiff == 0:
@@ -61,13 +69,28 @@ class controller():
             self.isDirectionMatching = False
         return int(currentDirection[0])
 
-    def getCurrentSpeed(self, PCF8591): # получить текущую скорость и проверить синхронизацию колес
-        speedOfWheels = PCF8591.analogRead()
-        if speedOfWheels[0] == speedOfWheels[1]
-            self.isWheelsSyncing = True
+    def getCurrentSpeed(self, pin):         
+        
+        firstTickTime = 0                                   # получить текущую скорость и проверить синхронизацию колес
+        lastTickTime = 0                                    # идея! установить наблюдателя за выходом gpio, при изменении состояния начать отсчет времени, закончить отсчет времени при повторном изменении состояния
+        iterationTime = 0                                   # скорость вращения - прошедшее время делить на два, умножить на двенадцать = время полного оборота   
+        ticks = 0
+
+        while  ticks != 1:
+            if pin.value != 0 and ticks == 0:
+                firstTickTime = time()
+                ticks += 1
+            if pin.value != 0 and ticks == 1:
+                lastTickTime = time()
+                ticks += 1
+        iterationTime = lastTickTime - firstTickTime    #i2c.writeReg8(dev, 0x48,0x40)                                	
+        speed = iterationTime  / 2 * 12                 #readedSpeed[0] = i2c.readReg8(dev,0x48)
+        if pin[0] == pin[2]                             #i2c.writeReg8(dev, 0x48,0x41)
+            self.isWheelsSyncing = True                 #readedSpeed[1] = i2c.readReg8(dev,0x48)
         else:
             self.isWheelsSyncing = False
-        return speedOfWheels
+
+        return speed
 
     def getDistance(self): # поулчить текущее расстояние и проверить, совпадает ли оно с целевым
         if self.distance == targetDistance:
@@ -112,6 +135,9 @@ class controller():
                 l_Motor_Pwm.ChangeDutyCycle(DUTY_CYCLE_L+temp)
             self.getCurrentSpeed()
 
+
+def setupPCF8591(addr)
+
 IN1 = 19   
 IN2 = 13
 IN3 = 6
@@ -123,7 +149,12 @@ SDA = 2
 
 FREQUENCY = 600 
 
-if __name__ == "main":
+addr = 0x48
+
+address = int(sys.argv[1]) if len(sys.argv) > 1 else BASE_ADDRESS
+pin_index = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+
+if __name__ == "__main__":
 
     controller = controller("penny")
     controller.uploading()
@@ -137,9 +168,12 @@ if __name__ == "main":
 
     pcf8591 = PCF8591(0x48)
 
+    
+    with I2CMaster() as i2c:
+        adc = PCF8591(i2c, FOUR_SINGLE_ENDED)
+        pin = adc.single_ended_input(pin_index)
+
     target = controller.countRoute("//home//kali//Documents//Map")
-    controller.targetDirection = target["targetDirection"]
-    controller.targetDistance = target["targetDistance"]
 
     controller.startMotion(100, 100, l_Motor_Pwm, r_Motor_Pwm)
     
@@ -149,7 +183,7 @@ if __name__ == "main":
 
         currentDirection = controller.getCurrentDirection()
         currentDistance = controller.getDistance()
-        currentSpeed = controller.getCurrentSpeed()
+        controller.getCurrentSpeed(pin)
 
         if controller.isDirectionMatching() == False:
             controller.correctDirection()
